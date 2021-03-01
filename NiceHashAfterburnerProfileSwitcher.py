@@ -102,9 +102,10 @@ class ProfileSwitcher:
             logger.info("Elevated privileges detected")
         elif self.scheduled_tasks_present:
             logger.info("Elevated privileges not detected but scheduled tasks present")
-        # else:
-        #     logger.info("No elevated privileges or scheduled tasks detected, exiting...")
-        #     sys.exit(0)
+        else:
+            logger.info("No elevated privileges or scheduled tasks detected, exiting...")
+            time.sleep(1)
+            sys.exit(0)
 
         # Main Loop
         while True:

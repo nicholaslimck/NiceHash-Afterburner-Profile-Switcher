@@ -1,2 +1,6 @@
 # Created by .ignore support plugin (hsz.mobi)
 /logs
+/PyInstaller/
+/build/
+/dist
+/NiceHashAfterburnerProfileSwitcher.spec
