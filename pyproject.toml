@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "nicehash-afterburner-profile-switcher"
+version = "0.3.0"
+description = ""
+authors = ["Nicholas Lim <nicholaslimck@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9.0"
+loguru = "*"
+colorama = "*"
+requests = "*"
+psutil = "^5.8.0"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

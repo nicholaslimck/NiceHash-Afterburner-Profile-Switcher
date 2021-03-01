@@ -1,106 +1,151 @@
-import json
 import time
+import socket
 import subprocess
 import APIRequests
-import NiceHashAlgoID
+import psutil
 
-import ctypes, sys
+import ctypes
+import sys
 
-from colorama import init
-init()
+from configparser import ConfigParser
+from loguru import logger
+from NiceHashAlgoID import Dict as NiceHashAlgoIDs
 
-def main():
-
-	#Default Varibles, to be overwritten
-	intervalTime = 10
-	profile1 = "MSIAfterburnerProfile1"
-	profile2 = "MSIAfterburnerProfile2"
-	MSIApplicationLocation = r"C:\Program Files (x86)\MSI Afterburner\MSIAfterburner.exe"
-	excavatorAddress = ("127.0.0.1", "5100")
-
-	previousAlgID = None
-	currentAlgID = None
-
-	elevatedPrivileges = isUserAdmin()
-	scheduleTasksPresent = hasScheduledTasks(profile1, profile2)
-
-	print("\033[2J\033[1;1f", end="") #Clears screen
-	print ("\033[32m" + "Starting Algorithm Monitor v0.2" + "\033[39m")
-
-	if elevatedPrivileges == True:
-		print("\033[36m" + "Running in Admin Mode" + "\033[39m")
-	elif scheduleTasksPresent == True:
-		print("\033[33m" + "Application is not being run as Admin" + "\033[39m")
-		print("Changing profiles using task scheduler MSI Afterburner profiles")
-	else:
-		print("\033[31m" + "Not running as admin and unable to locate task scheduler actions" + "\033[39m")
-		print("May result in inability to change MSI Afterburner profiles")
-
-	#Main Loop
-	while True:
-		currentTime = time.strftime("%X", time.localtime())
-		#localAPI
-		try:
-		    localData = APIRequests.jsonFromTCP(excavatorAddress,{ "id":1, "method":"algorithm.list", "params":[] })
-		except socket.error as error:
-			print("\033[k", end="")
-			print("\033[36m" + "Algorithm: " + "\033[31m" + "Error accessing local API" + "\033[39m", end=" ")
-			print("\033[36m" + "Last check: " + "\033[39m" + currentTime, end="\r")
-			time.sleep(intervalTime)
-			continue
-
-		try:
-			currentAlgID = localData["algorithms"][0]["algorithm_id"]
-			#print(NiceHashAlgoID.Dict[currentAlgID])
-		except IndexError:
-			print("\033[k", end="")
-			print("\033[36m" + "Algorithm: " + "\033[33m" + "API online, No mining detected" + "\033[39m", end=" ")
-			print("\033[36m" + "Last check: " + "\033[39m" + currentTime, end="\r")
-			time.sleep(intervalTime)
-			continue
-
-		if (previousAlgID != currentAlgID) and (previousAlgID != None) : #Never enters the loop
-			print("[" + currentTime + "]", end=" ")
-			print("Algorithm changed from " + NiceHashAlgoID.Dict[previousAlgID] + " to " + NiceHashAlgoID.Dict[currentAlgID])
-			if currentAlgID == 20 :
-				#Low power mode
-				if elevatedPrivileges == True:
-					subprocess.Popen([MSIApplicationLocation, "-profile2"], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-				elif scheduleTasksPresent == True:
-					subprocess.Popen([r"C:\Windows\System32\schtasks.exe", "/RUN", "/TN", profile2], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-				print("\033[k", end ="")
-				print("\033[35m" + "Changing MSIAfterburner to Low Power Mode" + "\033[39m")
-			if currentAlgID != 20 and previousAlgID == 20:
-				#High power mode
-				if elevatedPrivileges == True:
-					subprocess.Popen([MSIApplicationLocation, "-profile1"], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-				elif scheduleTasksPresent == True:
-					subprocess.Popen([r"C:\Windows\System32\schtasks.exe", "/RUN", "/TN", profile1], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-				print("\033[k", end ="")
-				print("\033[35m" + "Changing MSIAfterburner to High Power Mode" + "\033[39m")
-		previousAlgID = currentAlgID
-		print("\033[k", end ="")
-		print("\033[36m" + "Algorithm: " + "\033[39m" + NiceHashAlgoID.Dict[currentAlgID], end=" ")
-		print("\033[36m" + "Last check: " + "\033[39m" + currentTime, end="\r")
-
-		time.sleep(intervalTime)
+config = ConfigParser()
+config.read("config.ini")
+logger.add('logs/profileSwitcher.log')
 
 
-def isUserAdmin():
-	#Checking that program is elevated to admin preivligegs to allow for MSIAfterburner to be run without UAC notification
-	try:
-	    return ctypes.windll.shell32.IsUserAnAdmin()
-	except:
-	    return False
+class ProfileSwitcher:
+    def __init__(self, settings):
+        self.version = "0.3"
+        self.excavator_name = "excavator"
+        self.interval_time = int(settings['interval_time'])
+        self.msi_application_location = settings['msi_application_location']
+        self.excavator_address = (settings['excavator_ip'], int(settings['excavator_port']))
+        self.low_power_profile = {
+            'profile_num': settings['low_power_profile_num'],
+            'profile_name': settings['low_power_profile_name']
+        }
+        self.high_power_profile = {
+            'profile_num': settings['high_power_profile_num'],
+            'profile_name': settings['high_power_profile_name']
+        }
 
-def hasScheduledTasks(profile1, profile2):
-	#Check that MSIAfterburnerProfile1 and MSIAfterburnerProfile2 are found in task Scheduler
-	try:
-		subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", profile1], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-		subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", profile2], shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-		return True
-	except: #subprocess.CalledProcessError:
-		return False
+        self.previous_alg_id = None
+        self.current_alg_id = None
+
+        # Check for elevated privileges
+        self.elevated_privileges = ctypes.windll.shell32.IsUserAnAdmin()
+
+        # Check that MSIAfterburnerProfile1 and MSIAfterburnerProfile2 are found in task Scheduler
+        if not self.elevated_privileges:
+            try:
+                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", self.low_power_profile['profile_nane']],
+                                      shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", self.high_power_profile['profile_name']],
+                                      shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                self.scheduled_tasks_present = True
+            except subprocess.CalledProcessError:
+                self.scheduled_tasks_present = False
+
+    def check_excavator_running(self):
+        """
+        Checks if excavator is running.
+        Returns:
+            bool: True if excavator is running. False otherwise.
+        """
+        for proc in psutil.process_iter():
+            try:
+                # Check if process name contains the given name string.
+                if self.excavator_name.lower() in proc.name().lower():
+                    return True
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return False
+
+    def switch_low_power_profile(self):
+        """
+        Switch MSI Afterburner to configured Low Power Profile
+        """
+        logger.info("Changing MSI Afterburner to Low Power Mode")
+        if self.elevated_privileges:
+            subprocess.Popen([self.msi_application_location, f"-profile{self.low_power_profile['profile_num']}"],
+                             shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        elif self.scheduled_tasks_present:
+            subprocess.Popen([r"C:\Windows\System32\schtasks.exe", "/RUN", "/TN",
+                              self.low_power_profile['profile_name']],
+                             shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def switch_high_power_profile(self):
+        """
+            Switch MSI Afterburner to configured High Power Profile
+        """
+        logger.info("Changing MSI Afterburner to High Power Mode")
+        if self.elevated_privileges:
+            subprocess.Popen([self.msi_application_location, f"-profile{self.high_power_profile['profile_num']}"],
+                             shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        elif self.scheduled_tasks_present:
+            subprocess.Popen([r"C:\Windows\System32\schtasks.exe", "/RUN", "/TN",
+                              self.high_power_profile['profile_name']],
+                             shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def algo_monitor(self):
+        """
+        Main algorithm monitor loop.
+        """
+        logger.info(f"Starting Algorithm Monitor v{self.version}")
+
+        if self.elevated_privileges:
+            logger.info("Elevated privileges detected")
+        elif self.scheduled_tasks_present:
+            logger.info("Elevated privileges not detected but scheduled tasks present")
+        else:
+            logger.info("No elevated privileges or scheduled tasks detected, exiting...")
+            sys.exit(0)
+
+        # Main Loop
+        while True:
+            # localAPI
+            if self.check_excavator_running():
+                try:
+                    local_data = APIRequests.dict_from_tcp(self.excavator_address,
+                                                           {"id": 1, "method": "algorithm.list", "params": []})
+                except socket.error as error:
+                    logger.error(error)
+                    logger.info("Algorithm: Error accessing local API")
+                    if self.previous_alg_id == 20:
+                        self.switch_high_power_profile()
+                        self.previous_alg_id = None
+                    time.sleep(self.interval_time)
+                    continue
+
+                try:
+                    self.current_alg_id = local_data["algorithms"][0]["algorithm_id"]
+                except IndexError:
+                    logger.info("Algorithm: API online, No mining detected")
+                    time.sleep(self.interval_time)
+                    continue
+
+                if self.previous_alg_id != self.current_alg_id:
+                    logger.info(f"Algorithm changed from {NiceHashAlgoIDs[self.previous_alg_id]} "
+                                f"to {NiceHashAlgoIDs[self.current_alg_id]}")
+                    if self.current_alg_id == 20:
+                        self.switch_low_power_profile()
+
+                    if self.current_alg_id != 20 and self.previous_alg_id == 20:
+                        self.switch_high_power_profile()
+                self.previous_alg_id = self.current_alg_id
+                logger.info(f"Algorithm: {NiceHashAlgoIDs[self.current_alg_id]}")
+            else:
+                logger.info("Excavator not running.")
+                if self.previous_alg_id == 20:
+                    self.switch_high_power_profile()
+                    self.previous_alg_id = None
+
+            time.sleep(self.interval_time)
+
 
 if __name__ == "__main__":
-    main()
+    switcher = ProfileSwitcher(config["settings"])
+    switcher.algo_monitor()
