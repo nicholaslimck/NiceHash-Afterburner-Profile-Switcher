@@ -41,9 +41,11 @@ class ProfileSwitcher:
         # Check that MSIAfterburnerProfile1 and MSIAfterburnerProfile2 are found in task Scheduler
         if not self.elevated_privileges:
             try:
-                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", self.low_power_profile['profile_nane']],
+                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN",
+                                       self.low_power_profile['profile_name']],
                                       shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN", self.high_power_profile['profile_name']],
+                subprocess.check_call([r"C:\Windows\System32\schtasks.exe", "/Query", "/TN",
+                                       self.high_power_profile['profile_name']],
                                       shell=False, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
                 self.scheduled_tasks_present = True
             except subprocess.CalledProcessError:
@@ -100,9 +102,9 @@ class ProfileSwitcher:
             logger.info("Elevated privileges detected")
         elif self.scheduled_tasks_present:
             logger.info("Elevated privileges not detected but scheduled tasks present")
-        else:
-            logger.info("No elevated privileges or scheduled tasks detected, exiting...")
-            sys.exit(0)
+        # else:
+        #     logger.info("No elevated privileges or scheduled tasks detected, exiting...")
+        #     sys.exit(0)
 
         # Main Loop
         while True:
