@@ -10,7 +10,7 @@
 # <a name="introduction"></a>Introduction
 Script used to detect a change in mining algorithm and adjust MSI afterburner profile to maximize profits. Profile is reverted if Excavator is no longer running.<br />
 <br />
-<img src="Resources/NHAPS Screenshot.PNG" />
+<img src="Resources/NHAPS Screenshot.png" />
 
 Script tested with:<br />
 NiceHash Miner version 3.0.5.6<br />
